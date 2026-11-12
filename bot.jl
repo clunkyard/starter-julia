@@ -92,6 +92,22 @@ function turn(bot)
         climb=zone.shape==:sphere ? bot.angles.elevation_to(position,zone.center) : 0.0
         bot.drive.set(throttle=0.8,turn=bot.angles.clamp(bot.angles.angle_diff(bot.angles.bearing_to(position,zone.center),me.heading)/30),pitch_turn=bot.angles.clamp((climb-me.pitch)/30))
     end
+    # The arena's rate calibration only; safe to delete.
+    work=bot.raw.number("state.calibration.work")
+    work!==nothing && work>0 && bot.status.set(text="WORK",value=calibration_work(Int(work),bot.clock.tick))
+end
+
+# The calibration kernel, xorshift-sqrt v1: work rounds of a 64-bit xorshift
+# and a square-root sum.
+function calibration_work(work, tick)
+    x, sum = UInt64(88172645463325252) ⊻ UInt64(tick), 0.0
+    for _ in 1:work
+        x ⊻= x << 13
+        x ⊻= x >> 7
+        x ⊻= x << 17
+        sum += sqrt(Float64(x >> 11))
+    end
+    return (floor(Int, sum) + Int(x >> 40)) % 1000000
 end
 
 cy.run(cy.Robot(on_start=start,on_turn=turn))
