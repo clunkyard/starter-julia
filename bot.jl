@@ -7,7 +7,8 @@
 # clock: tick seconds remaining_ticks
 # arena: size gravity terrain_kind ground_height(x y)
 # me: health position velocity heading pitch roll angular_velocity
-#   attitude grounded altitude applied
+#   attitude grounded altitude applied hull_mounts to_mount(heading pitch)
+#   from_mount(heading pitch) mount_toward(point)
 # battery: charge capacity regen sustainable_drive compute
 #   drive_cost(fraction)
 # drive: hover_lift
@@ -29,7 +30,8 @@
 # score: me best armour
 # angles: normalize(degrees) angle_diff(target current)
 #   bearing_to(from to) elevation_to(from to) direction(heading pitch)
-#   distance(a b) clamp(value low high)
+#   distance(a b) to_chassis(heading pitch attitude)
+#   from_chassis(heading pitch attitude) clamp(value low high)
 # raw: number(path) text(path) has(path) flag(path) count(path) line()
 # Controls: drive.set(throttle turn pitch_turn)
 #   drive.forces(thrust strafe lift yaw_torque pitch_torque roll_torque brake)
@@ -44,6 +46,7 @@
 using ClunkyardSDK
 const cy=ClunkyardSDK
 const free=Ref(false)
+const dodges,dodge_end=Ref(0),Ref(0)
 steer(bot,towards,current)=bot.angles.clamp(bot.angles.angle_diff(towards,current)/45)
 
 function start(bot)
@@ -58,6 +61,7 @@ function turn(bot)
         throttle=target.range>350 ? 0.7 : target.range<200 ? -0.4 : 0.2
         bot.drive.set(throttle=throttle,turn=steer(bot,target.bearing,me.heading),pitch_turn=steer(bot,target.elevation,me.pitch))
         scanner.set(heading=target.bearing,arc=20,pitch=target.elevation)
+        # gun.lead is the intercept if the target holds course.
         power=gun.power_for_flight_time(target.range,1)
         aim=gun.lead(target,power)
         heading,pitch=aim===nothing ? (target.bearing,target.elevation) : (aim.heading,aim.pitch)
@@ -81,6 +85,23 @@ function turn(bot)
         pitch=free[] ? (div(bot.clock.tick,10)%3-1)*35.0 : 0.0
         scanner.set(heading=bot.angles.normalize(scanner.last.heading+36),arc=40,pitch=pitch)
         bot.status.set(text="SEARCH")
+    end
+    # A simple dodge: vary it, or predict the shooter.
+    tick=bot.clock.tick
+    if tick>=dodge_end[] && any(c->c.source==:muzzle,bot.sensors.cues)
+        dodges[]+=1
+        dodge_end[]=tick+10
+    end
+    if tick<dodge_end[]
+        # Off the line of fire: left, then right next time (turn is positive left, strafe right).
+        left=isodd(dodges[])
+        if bot.match.control==:forces
+            bot.drive.set(throttle=0.5)
+            bot.drive.forces(strafe=left ? -1.0 : 1.0)
+        else
+            bot.drive.set(throttle=1.0,turn=left ? 1.0 : -1.0)
+        end
+        bot.status.set(text=left ? "dodge:left" : "dodge:right",value=dodges[])
     end
     bot.battery.charge<bot.battery.capacity/4 && bot.drive.set(throttle=something(bot.drive.get("throttle"),0.0)*0.5)
     storm,zone=bot.nav.storm,bot.nav.zone
